@@ -37,7 +37,7 @@ def minidaq(ctx):
 @click.pass_context
 def readevent(ctx):
 
-    ctx.obj.analyse.send_string("Wake")
+    ctx.obj.analyse.send_string("Wake") # -------------added as a test message on 20 July 2022-------
     print(ctx.obj.analyse.recv_string())
 
     ctx.obj.trdbox.send_string(f"write 0x08 1") # send trigger
