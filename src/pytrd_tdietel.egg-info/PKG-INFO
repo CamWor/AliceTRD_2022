@@ -12,17 +12,9 @@ Classifier: License :: OSI Approved :: MIT License
 Classifier: Operating System :: OS Independent
 Requires-Python: >=3.6
 Description-Content-Type: text/markdown
-License-File: LICENSE
 
-
-PyTRD - Utilities for the ALICE TRD, implemented in Python
-==========================================================
-
-This repository contains utilities intended for the ALICE TRD prac at the
-University of Cape Town. It is intended as a collection point for all Python
-software, from control software for the TRD chamber, a monitoring programme,
-raw data reader and in the future also software related to the readout of the oscilloscope and analysis tools.
-
+# AliceTRD_2022
+An extension of https://github.com/tdietel/alicetrd-python.git to continue the work done on the UCT Alice Transition radiation detector. The https://github.com/mkidson/ALICE_LAB_2021.git oscilloscopeRead module is used and incorporated into the src to allow minidaq to read from the oscilloscope a well as the TRD chamber.
 
 Installation
 ------------
@@ -50,4 +42,5 @@ This is a basic monitor for DCS services. It is run without any arguments: `trdm
 ### Event dump
 
 Parse raw data files in various formats (time frames, the historical o32 format and a new format invented for the ZeroMQ DAQ (partially) contained in this repository). 
+
 

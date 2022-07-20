@@ -1,3 +1,4 @@
 dcs
+oscilloscopeRead
 rawdata
 trdmon

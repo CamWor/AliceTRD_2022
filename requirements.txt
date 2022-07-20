@@ -4,3 +4,6 @@ click
 urwid
 termcolor
 numpy
+PySerial
+Pillow
+matplotlib

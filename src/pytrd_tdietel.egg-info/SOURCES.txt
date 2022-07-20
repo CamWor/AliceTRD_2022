@@ -1,10 +1,15 @@
-LICENSE
 README.md
 pyproject.toml
 setup.cfg
 src/dcs/__init__.py
 src/dcs/minidaq.py
 src/dcs/trdbox.py
+src/oscilloscopeRead/__init__.py
+src/oscilloscopeRead/dso1kb.py
+src/oscilloscopeRead/gw_com_1kb.py
+src/oscilloscopeRead/gw_lan.py
+src/oscilloscopeRead/scopeRead.py
+src/oscilloscopeRead/setup.py
 src/pytrd_tdietel.egg-info/PKG-INFO
 src/pytrd_tdietel.egg-info/SOURCES.txt
 src/pytrd_tdietel.egg-info/dependency_links.txt
