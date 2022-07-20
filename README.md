@@ -8,12 +8,16 @@ This package uses setuptools. For now, I suggest to install it in a virtual envi
 ```
 python3 -m venv venv
 . venv/bin/activate
-python -m pip install upgrade pip
-python -m pip install -r requirements.txt
-python -m install -e .
+python -m pip install --upgrade pip
+python -m pip install -r AliceTRD_2022/requirements.txt
+
+cd alicetrd-python
+python -m pip install -e .
+
+. /home/trd/tdietel/pytrd/venv/bin/activate
 ```
 
-Once installed, activate the environment with `. path/to/AliceTRD_2022/venv/bin/activate`, add `venv/bin` to the path, or run the commands with the full path `path/to/AliceTRD_2022/venv/bin/trdmon`.
+Once installed, activate the environment with `. path/to/pytrd/venv/bin/activate`, add `venv/bin` to the path, or run the commands with the full path `path/to/pytrd/venv/bin/trdmon`.
 
 Usage
 -----
