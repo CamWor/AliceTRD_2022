@@ -1,0 +1,7 @@
+[console_scripts]
+evdump = rawdata:evdump
+minidaq = dcs:minidaq
+raw2digits = rawdata:rec_digits
+trdbox = dcs:trdbox
+trdmon = trdmon:cli
+
