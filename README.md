@@ -1,5 +1,5 @@
 # AliceTRD_2022
-An extension of https://github.com/tdietel/alicetrd-python.git to continue the work done on the UCT Alice Transition radiation detector. The https://github.com/mkidson/ALICE_LAB_2021.git oscilloscopeRead module is used and incorporated into the src to allow minidaq to read from the oscilloscope a well as the TRD chamber.
+An extension of https://github.com/tdietel/alicetrd-python.git to continue the work done on the UCT Alice Transition radiation detector for my 3rd year PHY3004W project. The https://github.com/mkidson/ALICE_LAB_2021.git oscilloscopeRead module is used and incorporated into the src to allow minidaq to read from the oscilloscope a well as the TRD chamber.
 
 Installation
 ------------
