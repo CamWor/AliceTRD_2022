@@ -7,14 +7,16 @@ import logging
 
 from rawdata.tfreader import RawDataHeader
 
-from .rawlogging import AddLocationFilter
-from .constants import eodmarker,eotmarker,magicmarker
+from .rawlogging import AddLocationFilter, HexDump
+from .constants import eodmarker,eotmarker
 from .base import BaseHeader, BaseParser, DumpParser
-from .bitstruct import BitStruct, HexDump
+from .bitstruct import BitStruct
 
 logger = logging.getLogger(__name__)
 logflt = AddLocationFilter()
 logger.addFilter(logflt)
+
+hexdump = HexDump()
 
 
 class decode:
@@ -25,20 +27,35 @@ class decode:
 	to help with the parsing of data words according to	this format. If the
 	parsing succeeds, the function is called with an additional argument that
 	contains the extracted fields as a namedtuple. An assertion error is
-	raised dif the parsing fails."""
+	raised dif the parsing fails.
+	
+	An extension to the TRAP format is that uppercase characters indicate
+	that the corresponding bit must be inverted. This is handy for tracklets,
+	where this inversion is used frequently to avoid misinterpretation of 
+	tracklet words as tracklet-end-markers."""
 
 	def __init__(self, pattern):
 
 		fieldinfo = dict()
+		self.invert_mask = 0
 
 		# calculate bitmask and required shift for every character
 		for i,x in enumerate(x for x in pattern if x not in ": "):
 			p = 31-i # bit position
+
+			# if the char is upper case, we need to invert the bit
+			if x.isupper():
+				self.invert_mask |= 1<<p
+			
+			# from now on, we only need the lower case characters
+			x = x.lower()
+
 			if x not in fieldinfo:
 				fieldinfo[x] = dict(mask=1<<p, shift=p)
 			else:
 				fieldinfo[x]['mask'] |= 1<<p
 				fieldinfo[x]['shift'] = p
+
 
 		# remember bits marked as '0' or '1' for validation of the dword
 		zero_mask = fieldinfo.pop('0')['mask'] if '0' in fieldinfo else 0
@@ -58,9 +75,10 @@ class decode:
 	def __call__(self,func):
 
 		@wraps(func)
-		def wrapper(ctx, dword):
+		def wrapper(*args):
+			dword = args[-1] # the last argument is the dword we want to decode
 			assert( (dword & self.validate_mask) == self.validate_value)
-			return func(ctx,dword,self.decode(dword))
+			return func(*args,self.decode(dword ^ self.invert_mask))
 
 		return wrapper
 
@@ -119,7 +137,6 @@ ParsingContext = namedtuple('ParsingContext', [
 # ------------------------------------------------------------------------
 # Generic dwords
 
-
 @describe("SKP ... skip parsing ...")
 def skip_until_eod(ctx, dword):
 	assert(dword != eodmarker)
@@ -137,22 +154,75 @@ def find_eod_mcmhdr(ctx, dword):
 	# assert(dword != eodmarker)
 	return dict(readlist=[[find_eod_mcmhdr]])
 
-
-@describe("TRK tracklet")
-def parse_tracklet(state, dword):
-	assert(dword != eotmarker)
-	return dict(readlist=[[parse_tracklet, parse_eot]])
-
-
-@describe("EOT")
 def parse_eot(ctx, dword):
 	assert(dword == eotmarker)
-	return dict(readlist=[[parse_eot, parse_hc0]])
+	hexdump(ctx.current_linkpos, dword, "EOT - end of tracklets")
+	return dict(readlist=[[parse_eot, parse_cru_padding, parse_hc0]])
 
-@describe("EOD")
 def parse_eod(ctx, dword):
 	assert(dword == eodmarker)
-	return dict(readlist=[[parse_eod]])
+	hexdump(ctx.current_linkpos, dword, "EOD - end of raw data")
+	return dict(readlist=[[parse_eod, parse_cru_padding]])
+
+def parse_cru_padding(ctx, dword):
+	assert(dword == 0xEEEEEEEE)
+	hexdump(ctx.current_linkpos, dword, "padding")
+	return dict(readlist=[[parse_cru_padding]])
+
+# ------------------------------------------------------------------------
+# Tracklet data
+
+# @decode("ffff : tttt : tttt : tttt : ttt0 : ssss : sppp : ccci") # should be correct
+@decode("ffff : tttt : tttt : tttt : ttt1 : SSSS : SPPP : CCCI")
+def parse_tracklet_hc_header(ctx, dword, fields):
+	hc = f"{fields.s:02}_{fields.c}_{fields.p}{'A' if fields.i==0 else 'B'}"
+	hcid = 60*fields.s + 12*fields.c + 2*fields.p + fields.i
+	hexdump(ctx.current_linkpos, dword, f"TRK HC header {hc} (hcid {hcid})")
+	return dict(readlist=[[parse_tracklet_mcm_header(hcid), parse_eot]])
+
+
+class parse_tracklet_mcm_header:
+
+	def __init__(self, hcid):
+		self.hcid = hcid
+		self.__name__ = f"parse_tracklet_mcm_header(hcid={hcid})"
+
+	@decode("1zzz : zyyc : cccc : cccb: bbbb : bbba : aaaa : aaa1")
+	def __call__(self, ctx, dword, fields):
+		pid = tuple((fields.a, fields.b, fields.c))
+		mcm = f"{fields.z//4 + self.hcid%2}:{4*(fields.z%4) + fields.y:02d}"
+		hexdump(ctx.current_linkpos, dword, 
+			f"    MCM {mcm} row={fields.z} col={fields.y} pid = {pid[0]} / {pid[1]} / {pid[2]}")
+
+		rl = list()
+		for p in pid:
+			if p != 0xFF:
+				rl.append([parse_tracklet_word(self.hcid, p, fields.z, fields.y)])
+
+		# rl = list([parse_tracklet_word(self.hcid, p, fields.z, fields.y)] for p in pid if p != 0)
+
+		rl.append([parse_tracklet_mcm_header(self.hcid), parse_eot])
+		return dict(readlist=rl)
+
+class parse_tracklet_word:
+	def __init__(self, hcid, hpid, row, col):
+		self.hcid = hcid
+		self.pid = hpid << 12
+		self.row = row
+		self.col = col
+		self.__name__ = f"parse_tracklet_word(hcid={hcid},row={row},col={col})"
+
+	@decode("yyyy : yyyY : yyyp : pppp : pppp : pppd : dddD : ddd0")
+	def __call__(self, ctx, dword, fields):
+		self.pid |= fields.p
+		hexdump(ctx.current_linkpos, dword, f"        y={fields.y} dy={fields.d} pid={self.pid}")
+
+@decode("pppp : pppp : zzzz : dddd : dddy : yyyy : yyyy : yyyy")
+@describe("TRKL row={z} pos={y} slope={d} pid={p}")
+def parse_legacy_tracklet(ctx, dword, fields):
+	assert(dword != eotmarker)
+	return dict(readlist=[[parse_legacy_tracklet, parse_eot]])
+
 
 # ------------------------------------------------------------------------
 # Half-chamber headers
@@ -318,11 +388,20 @@ class parse_adcdata:
 class TrdFeeParser:
 
 	#Defining the initial variables for class
-	def __init__(self, store_digits = None):
+	def __init__(self, store_digits = None, tracklet_format = "run3"):
 		self.ctx = ParsingContext
 		self.ctx.event = 0
 		self.ctx.store_digits = store_digits
 		self.readlist = None
+
+		if tracklet_format == "run3":
+			self.readlist_start = [ list([parse_tracklet_hc_header, parse_eot]) ]
+		elif tracklet_format == "run2":
+			self.readlist_start = [ list([parse_legacy_tracklet, parse_eot]) ]
+		elif tracklet_format == "auto":
+			self.readlist_start = [ list([parse_tracklet_hc_header, parse_legacy_tracklet, parse_eot]) ]
+		else:
+			raise ValueError(f"Invalid tracklet format '{tracklet_format}'")
 
 	def next_event(self):
 		self.ctx.event += 1
@@ -334,10 +413,12 @@ class TrdFeeParser:
         '''
 
 		self.ctx.current_linkpos = linkpos
-
-		self.readlist = [ list([parse_tracklet, parse_eot]) ]
+		self.reset()
 		self.process_linkdata(linkdata)
 
+	def reset(self):
+		self.readlist = self.readlist_start.copy()
+		# logger.info(f"{self.readlist}")
 
 	def process_linkdata(self, linkdata):
 
@@ -393,7 +474,8 @@ class TrdFeeParser:
 		self.ctx.current_linkpos = -1
 
 		if self.readlist is None:
-			self.readlist = [ list([parse_tracklet, parse_eot]) ]
+			self.reset()
+			# self.readlist = [ list([parse_tracklet, parse_eot]) ]
 
 		# logger.info(f"{self.readlist}")
 
@@ -486,61 +568,31 @@ class TrdHalfCruHeader(BaseHeader):
 			rawoffset += sz
 
 		self.offset = tuple(offsets)
-		for i, off in enumerate(self.offset):
-			logger.info(f"Link {i} expected to start at 0x{off:06x}")
+		# for i, off in enumerate(self.offset):
+		# 	logger.info(f"Link {i} expected to start at 0x{off:06x}")
 
-		for i, desc in enumerate(self._hexdump_desc):
-			self._hexdump_desc[i] = f"HCRU[{i//4}.{i%4}]  {desc}"
+		# for i, desc in enumerate(self._hexdump_desc):
+		# 	self._hexdump_desc[i] = f"HCRU[{i//4}.{i%4}]  {desc}"
 		# logger.info(self._hexdump_desc)
 
+		self._hexdump_desc[0] = "HCRU version={version} cru=0x{cru:03X} evtype=0x{evtype:X}"
 
-# class TrdHalfCruHeader(BaseHeader):
+		for i in range(15):
+			self._hexdump_desc[i+1] = f"Link {i:02d}: {self.fmtlink(i)}"
+		# # self._hexdump_desc[15] = f"HCRU[3.3]  14: {self.fmtlink(14)}"
+		# self._hexdump_desc = HexDump.colorize(self._hexdump_desc)
 
-# 	header_size = 0x40 # 256 bits = 64 bytes
-
-# 	""" TRD CRU Header"""
-# 	def parse(self, data):
-# 		fields = unpack("<L4x15B9x15H2x", data)
-# 		# self.parse_hw0(fields[0])
-# 		self.errflags = tuple(fields[1:16])
-# 		self.datasize = tuple(fields[16:31])
-
-# 		self.version = 42
-# 		self.hdrsize = 99
-
-# 	@describe("tttt : eeee : ssss : cccc : cccc : cccc : vvvv : vvvv")
-# 	# TODO @assignattr(self, version="v", stopbit="s", bc="c", endpoint="e", evtype="t")
-# 	def parse_hw0(self, data, fields):
-# 		self.version = fields.v
-# 		self.stopbit = fields.s
-# 		self.bc = fields.c
-# 		self.endpoint = fields.e
-# 		self.evtype = t
-
-# 	def describe_dword(self, i):
-# 		dwi = f"HCRU[{i//4}.{i%2}]  "
-
-# 		if i==0:
-# 			return dwi + "bla"
-# 		elif i==1:
-# 			return dwi + "bla"
-# 		elif i<=4:
-# 			return dwi + " ".join(
-# 				f"{j:x}:{self.errflags[j]:x}" for j in range(4*i-5,4*i-9,-1))
-# 		elif i==5:
-# 			return dwi + "    " + " ".join(
-# 				f"{j:x}:{self.errflags[j]:x}" for j in range(4*i-6, 4*i-9, -1))
-# 		elif i<8:
-# 			return dwi
-# 		elif i <= 14:
-# 			return dwi + " ".join(
-# 				f"{j:x}:{self.datasize[j]:04X}({self.errflags[j]:x})" 
-# 				for j in range(2*i-15, 2*i-17, -1))
-# 		else:
-# 			return dwi
+	def fmtlink(self, linkno):
+		if self.errflags[linkno] == 0:
+			return f"0x{self.datasize[linkno]:X} bytes @ 0x{self.offset[linkno]:012X}"
+		elif self.errflags[linkno] <= 2:
+			return f"LME type {self.errflags[linkno]}"
+		else:
+			return f"Error 0x{self.errflags[linkno]:02x} = {self.errflags[linkno]:3d}"
 
 class TrdCruParser(BaseParser):
 	def __init__(self):
+
 		# self.feeparser = DumpParser(logging.getLogger("raw.trd.fee"))
 		self.feeparser = TrdFeeParser() #(logging.getLogger("raw.trd.fee"))
 
@@ -551,12 +603,14 @@ class TrdCruParser(BaseParser):
 		self.link = None
 		self.unread = None # bytes remaining to be parse in current link
 
+
 	def read(self, stream, size):
 
 		hdump = HexDump()
 		hdump._markers[0x00000000BB88] = ["here"]
 
-		maxpos = stream.tell() + size
+		startpos = stream.tell()
+		maxpos = startpos + size
 		while stream.tell() < maxpos:
 
 			avail_bytes = maxpos - stream.tell()
@@ -574,6 +628,7 @@ class TrdCruParser(BaseParser):
 					raise ValueError("Insufficient data for Half-CRU header")
 
 				self.hcruheader = TrdHalfCruHeader.read(stream)
+				self.hexdump(self.hcruheader)
 				self.link = None
 				self.unread = None
 
@@ -591,6 +646,8 @@ class TrdCruParser(BaseParser):
 				self.unread -= readsize
 
 			if self.unread == 0:
+				logger.info(f"DONE processing link {self.link}")
+				self.feeparser.reset() # start new link
 				if self.link < 14:
 					self.link += 1
 					self.unread = None
@@ -599,9 +656,9 @@ class TrdCruParser(BaseParser):
 					self.link = None
 					self.unread = None
 				
-			if self.hcruheader is None:
-				logger.info(f"{maxpos - stream.tell()} padding bytes")
-				hdump.fromfile(stream, maxpos - stream.tell())
+			# if self.hcruheader is None:
+			# 	logger.info(f"{maxpos - stream.tell()} padding bytes")
+				# hdump.fromfile(stream, maxpos - stream.tell())
 				# assert(False)
 				# stream.seek(maxpos-1)
 			

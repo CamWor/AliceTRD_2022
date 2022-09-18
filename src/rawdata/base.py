@@ -30,6 +30,7 @@ class BaseParser:
             f"incomplete read{len(data)} of {nbytes} bytes")
         return self.parse(data,addr)
 
+
 class DumpParser(BaseParser):
     def __init__(self, logger):
         self.logger = logger
@@ -48,6 +49,7 @@ class DumpParser(BaseParser):
 
 class BaseHeader:
     header_size = 0
+    _hexdump_fmt = ('\033[1;37;40m', '\033[0;37;100m')
 
     def __init__(self, data, addr):
         if not isinstance(data, bytes) or len(data) != self.header_size:
@@ -61,14 +63,13 @@ class BaseHeader:
         for k, v in zip(self.keys(), self.unpack(data)):
             setattr(self,k,v)
         
-
     @classmethod
     def read(cls, stream):
         addr = stream.tell()
         data = stream.read(cls.header_size)
-        print(f"Reading {cls.__name__} at offset 0x{addr:06X}")
+        # print(f"Reading {cls.__name__} at offset 0x{addr:06X}")
         header = cls(data, addr)
-        header.hexdump()
+        # header.hexdump()
         return header
 
     def unpack(self, data):
@@ -77,12 +78,6 @@ class BaseHeader:
     def keys(self):
         pass
 
-    def hexdump(self):
-
-    # def log(self, data, addr):
-        logger = logging.getLogger("raw.rdh")
-        for i, dw in enumerate(unpack(f"<{self.header_size/4}L", data)):
-            logger.info(f"{addr+4*i:012X} {dw:08X}")
-
     def describe_dword(self, i):
         return ""
+
